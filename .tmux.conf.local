@@ -29,7 +29,7 @@ tmux_conf_new_session_prompt=false
 #   - true
 #   - false (default)
 #   - disabled (do not modify new-session bindings)
-tmux_conf_new_session_retain_current_path=false
+tmux_conf_new_session_retain_current_path=true
 
 
 # -- windows & pane creation ---------------------------------------------------
@@ -38,7 +38,7 @@ tmux_conf_new_session_retain_current_path=false
 #   - true
 #   - false (default)
 #   - disabled (do not modify new-window bindings)
-tmux_conf_new_window_retain_current_path=false
+tmux_conf_new_window_retain_current_path=true
 
 # new window tries to reconnect ssh sessions, possible values are:
 #   - true
@@ -69,7 +69,7 @@ tmux_conf_new_pane_reconnect_ssh=false
 # automatic detection relies on the COLORTERM environment variable being defined
 # to 'truecolor' or '24bit' or '$ tput colors' answering '16777216'
 # see https://github.com/termstandard/colors
-tmux_conf_24b_colour=auto
+tmux_conf_24b_colour=true
 
 
 # -- theming -------------------------------------------------------------------
@@ -370,7 +370,7 @@ tmux_conf_theme_clock_style="24"
 #   - false (default)
 #   - disabled
 # on Linux, this requires xsel, xclip or wl-copy
-tmux_conf_copy_to_os_clipboard=false
+tmux_conf_copy_to_os_clipboard=true
 
 
 # -- urlscan -------------------------------------------------------------------
@@ -380,29 +380,65 @@ tmux_conf_urlscan_options="--compact --dedupe"
 
 
 # -- user customizations -------------------------------------------------------
+# -- tuned for Claude Code TUI sessions ----------------------------------------
 
-# this is the place to override or undo settings
+# scrollback: Claude Code streams a lot of output (tool calls, diffs, logs).
+# 100k lines gives you room to scroll back through long agent sessions.
+set -g history-limit 100000
 
-# increase history size
-#set -g history-limit 10000
+# mouse on: scroll Claude's pane, click panes/windows, drag pane borders.
+set -g mouse on
 
-# start with mouse mode enabled
-#set -g mouse on
+# kill the 500 ms escape delay - Claude's TUI uses ESC for cancel/back.
+# Without this, ESC feels sluggish and double-tapping ESC eats keystrokes.
+set -s escape-time 10
 
-# force Vi mode
-#   really you should export VISUAL or EDITOR environment variable, see manual
-#set -g status-keys vi
-#set -g mode-keys vi
+# focus events: Claude's TUI (and editors in other panes) rely on these to
+# detect focus changes and refresh / pause animations.
+set -g focus-events on
 
-# replace C-b by C-a instead of using both prefixes
-# set -gu prefix2
-# unbind C-a
-# unbind C-b
-# set -g prefix C-a
-# bind C-a send-prefix
+# allow-passthrough: lets nested programs emit OSC escape sequences (clipboard
+# OSC 52, terminal images, hyperlinks) through tmux to the outer terminal.
+# Required for Claude's clickable file:line links and clipboard ops.
+set -g allow-passthrough on
+set -g set-clipboard on
 
-# if you don't want Oh my tmux! to alter a binding or a setting, use #!important
-# bind c new-window -c '#{pane_current_path}' #!important
+# notify when a window has a bell. Claude Code emits a terminal bell when a
+# long-running agent task finishes (configurable via terminal.bell setting).
+# This makes the window flag with '!' in the status bar so you can jump to it.
+setw -g monitor-bell on
+setw -g monitor-activity on
+set -g visual-bell off
+set -g visual-activity off
+set -g bell-action other
+
+# windows start at 1 (easier on the left hand than reaching for 0).
+set -g base-index 1
+setw -g pane-base-index 1
+
+# renumber windows when one closes so indexes stay packed (1,2,3 not 1,3,4).
+set -g renumber-windows on
+
+# resize to the smallest attached client only if both clients are looking at
+# the same window. Lets you attach from a laptop without shrinking the desktop.
+setw -g aggressive-resize on
+
+# fast status refresh so the prefix/bell indicators feel snappy.
+set -g status-interval 5
+
+# true-color terminal. The OMT framework sets tmux-256color + RGB overrides
+# automatically when tmux_conf_24b_colour=true, this just belts-and-braces it.
+set -ga terminal-overrides ",*256col*:Tc,xterm-256color:Tc,alacritty:Tc"
+
+# pane splits keep current working directory (handy when you're deep in a repo).
+bind | split-window -h -c "#{pane_current_path}"
+bind - split-window -v -c "#{pane_current_path}"
+
+# quick config reload.
+bind r source-file ~/.tmux.conf \; display "tmux config reloaded"
+
+# launch claude in a new window from the current cwd.
+bind C new-window -c "#{pane_current_path}" "claude"
 
 # display a message after toggling mouse support
 bind m run "cut -c3- '#{TMUX_CONF}' | sh -s _toggle_mouse" \; display 'mouse #{?#{mouse},on,off}'
@@ -447,11 +483,22 @@ tmux_conf_uninstall_plugins_on_reload=true
 # /!\ the 'set -g @tpm_plugins' syntax is not supported
 # to enable a plugin, use the 'set -g @plugin' syntax:
 # visit https://github.com/tmux-plugins for available plugins
-#set -g @plugin 'tmux-plugins/tmux-copycat'
-#set -g @plugin 'tmux-plugins/tmux-cpu'
-#set -g @plugin 'tmux-plugins/tmux-resurrect'
-#set -g @plugin 'tmux-plugins/tmux-continuum'
-#set -g @continuum-restore 'on'
+
+# tmux-yank: copy to system clipboard with `y` in copy-mode.
+set -g @plugin 'tmux-plugins/tmux-yank'
+
+# tmux-resurrect: save/restore window layouts + running programs.
+#   prefix + Ctrl-s  save
+#   prefix + Ctrl-r  restore
+# Especially useful after a reboot when you had many Claude sessions open
+# in named tmux windows — the layout/cwd comes back, you just rerun `claude`.
+set -g @plugin 'tmux-plugins/tmux-resurrect'
+set -g @resurrect-capture-pane-contents 'on'
+
+# tmux-continuum: auto-saves every 15 min and auto-restores on tmux start.
+set -g @plugin 'tmux-plugins/tmux-continuum'
+set -g @continuum-restore 'on'
+set -g @continuum-save-interval '15'
 
 
 # -- custom variables ----------------------------------------------------------
